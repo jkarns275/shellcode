@@ -10,53 +10,75 @@
  */
 int foo(void);
 int change_page_permissions_of_address(void *addr, size_t len);
+
+#define BASE 0xe7
+
 int main(void) {
-    FILE *f = fopen("test_fn", "rb");
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
-    
-    unsigned char *string = malloc(fsize);
-    fread(string, fsize, 1, f);
-    fclose(f);
+
+  // Read payload
+  printf("Reading payload... ");
+  FILE *f = fopen("conjoined", "rb");
+  fseek(f, 0, SEEK_END);
+  long fsize = ftell(f);
+  fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
+  
+  int sl = fsize;
+  unsigned char *string = calloc(sl, 1);
+  fread(string, fsize, 1, f);
+  fclose(f);
+  printf("done\n");
+
+  printf("Chainging page permissions... ");
+  // Change the permissions of the page that contains foo() to read, write, and execute
+  // This assumes that foo() is fully contained by a single page
+  void *foo_addr = (void*)foo;
+  if(change_page_permissions_of_address(foo_addr, sl) == -1) {
+      fprintf(stderr, "Error while changing page permissions of foo(): %s\n", strerror(errno));
+      return 1;
+  }
+  printf("done\n");
+
+  // Call the unmodified foo()
+  int p = foo();
+
+  unsigned char *add = foo_addr;
+  printf("Copying payload... \n");
+
+  int64_t _PLT_SLOTS[] = PLT_SLOTS;// {0x4018 + PAYLOAD_OFFSET, 0x4020 + PAYLOAD_OFFSET};
+  void* _SLOT_VALUES[] = SLOT_VALUES;// {}
+  int N_FNS = sizeof(_PLT_SLOTS) / 8;
+ 
+  for (int i = 0; i < sl; i++)
+    add[i] = string[i];
+  printf("Done copying payload... \n");
+
+  // decrypt payload
+  int32_t key[] = {0x12d2c92e, 0x15ea3da8, 0x56233213, 0x26b00e15};
+  void (*decrypt)(int v[], const int k[]) = foo_addr;
+  for (int i = 0; i < sl / 8; i++) {
+    (*decrypt)(&add[BASE + i * 8], key);
+  }
+  printf("Done\n");
+  
+  printf("Initializing PLT\n");
+  for (int i = 0; i < N_FNS; i++) {
+    printf("*%p = %p\n", &add[_PLT_SLOTS[i]], _SLOT_VALUES[i]);
+    *(void **)(&add[_PLT_SLOTS[i]]) = _SLOT_VALUES[i];
+  }
+  printf("Done initializing PLT\n");
 
 
-    void *foo_addr = (void*)foo;
+  int (*fn)(void *) = (foo_addr + HOOK_OFFSET + BASE);
+  printf("%p %p\n", fn, foo); fflush(0);
 
-    // Change the permissions of the page that contains foo() to read, write, and execute
-    // This assumes that foo() is fully contained by a single page
-    if(change_page_permissions_of_address(foo_addr, fsize) == -1) {
-        fprintf(stderr, "Error while changing page permissions of foo(): %s\n", strerror(errno));
-        return 1;
-    }
+  // Calling the modified foo()
+  printf("Calling payload fn\n");
+  int x = fn((void *) printf);
 
-    // Call the unmodified foo()
-    puts("Calling foo...");
-    int p = foo();
-    printf("before: %d\n", p);
+  // void *pp = (void *)change_page_permissions_of_address - (void *) foo;
+  // printf("%x \n");
 
-    unsigned char *add = foo_addr;
-
-    for (int i = 0; i < fsize; i++) {
-      printf("%d\n", i);
-      add[i] = string[i];
-    }
-    printf("Done\n");
-
-
-    int (*fn)(void) = (foo_addr + 0x11139);
-    printf("%p %p\n", fn, foo); fflush(0);
-
-
-    // Call the modified foo()
-    puts("Calling fn...");
-    int x = 0;//fn();
-    printf("after: %d\n", x);
-
-    // void *pp = (void *)change_page_permissions_of_address - (void *) foo;
-    // printf("%x \n");
-
-    return 0;
+  return 0;
 }
 
 int foo(void) {

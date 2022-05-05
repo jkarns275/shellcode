@@ -1,8 +1,24 @@
 #include <stdio.h>
 
-int tt() {
-//  printf("Hello\n");
-  return 1;
+int dd() {
+  return 4;
 }
 
-int main() {}
+int cc() {
+  return dd();
+}
+
+int bb() {
+  return cc();
+}
+
+int aa() {
+  int b = 4 + 3;
+  printf("Hello\n");
+  return bb();
+}
+
+int base_hook(void *pr) {
+  aa();
+  return 1;
+}
